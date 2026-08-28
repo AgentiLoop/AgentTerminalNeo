@@ -15,7 +15,7 @@ public enum TerminalNeoRenderer: Sendable {
     private static let codeRx = try? NSRegularExpression(pattern: #"`([^`]+)`"#)
     private static let headerRx = try? NSRegularExpression(pattern: #"^(#{1,6})\s+(.+)$"#, options: .anchorsMatchLines)
     private static let bulletRx = try? NSRegularExpression(pattern: #"^(\s*)[-*+]\s+(.*)"#)
-    private static let numListRx = try? NSRegularExpression(pattern: #"^(\s*)\d+\.\s+(.*)"#)
+    private static let numListRx = try? NSRegularExpression(pattern: #"^(\s*)(\d+)\.\s+(.*)"#)
     private static let hrRx = try? NSRegularExpression(pattern: #"^\s*([-*_]\s*){3,}$"#)
 
     // MARK: - Public API
@@ -183,9 +183,8 @@ public enum TerminalNeoRenderer: Sendable {
 
         if let m = numListRx?.firstMatch(in: line, range: r) {
             let indent = ns.substring(with: m.range(at: 1))
-            let content = ns.substring(with: m.range(at: 2))
-            let numEnd = line.firstIndex(of: ".")!
-            let num = String(line[line.startIndex...numEnd])
+            let num = ns.substring(with: m.range(at: 2)) + "."
+            let content = ns.substring(with: m.range(at: 3))
             let prefix = NSMutableAttributedString(string: indent + num + " ",
                                                     attributes: [.font: font, .foregroundColor: TerminalNeoTheme.dim])
             prefix.append(applyInlineMarkdown(content, baseFont: font, baseColor: TerminalNeoTheme.text))
