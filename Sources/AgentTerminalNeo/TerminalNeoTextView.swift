@@ -30,7 +30,8 @@ public struct TerminalNeoTextView: NSViewRepresentable {
         Coordinator()
     }
 
-    public final class Coordinator: @unchecked Sendable {
+    @MainActor
+    public final class Coordinator {
         var updateLastLength: Int = 0
         var onContentHeight: ((CGFloat) -> Void)?
         weak var textView: NSTextView?
@@ -39,6 +40,14 @@ public struct TerminalNeoTextView: NSViewRepresentable {
         var needsTableRender: Bool = false
         var lastGrowTime: Date = Date()
         var lastReportedHeight: CGFloat = 0
+
+        /// Plain-text color for incremental appends / cursor, from the view's own appearance.
+        func textColor(for tv: NSTextView) -> NSColor {
+            let isDark = tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return isDark
+                ? NSColor(red: 0.2, green: 0.9, blue: 0.3, alpha: 1)
+                : NSColor(red: 0.05, green: 0.35, blue: 0.1, alpha: 1)
+        }
     }
 
     public func makeNSView(context: Context) -> NSView {
@@ -128,13 +137,13 @@ public struct TerminalNeoTextView: NSViewRepresentable {
                             storage.deleteCharacters(in: NSRange(location: prevAttrLen - 1, length: 1))
                         }
                     }
+                    // NSTextStorage.length is a UTF-16 count — index `text` in UTF-16 too,
+                    // otherwise emoji/combining characters skew the append offset.
                     let startIdx = max(0, storage.length)
-                    if startIdx < text.count {
-                        let newPart = String(text[text.index(text.startIndex, offsetBy: startIdx)...])
-                        let isDark = tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                        let color: NSColor = isDark
-                            ? NSColor(red: 0.2, green: 0.9, blue: 0.3, alpha: 1)
-                            : NSColor(red: 0.05, green: 0.35, blue: 0.1, alpha: 1)
+                    if startIdx < text.utf16.count,
+                       let from = String.Index(utf16Offset: startIdx, in: text).samePosition(in: text) {
+                        let newPart = String(text[from...])
+                        let color = coord.textColor(for: tv)
                         storage.beginEditing()
                         storage.append(NSAttributedString(string: newPart, attributes: [
                             .font: coord.termFont, .foregroundColor: color
@@ -150,9 +159,7 @@ public struct TerminalNeoTextView: NSViewRepresentable {
             coord.lastGrowTime = Date()
             // Table mode: on while last non-empty line starts with |, off when text moves past table
             let lastNonEmpty = contentText.components(separatedBy: "\n").last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) ?? ""
-            if lastNonEmpty.trimmingCharacters(in: .whitespaces).hasPrefix("|") {
-                coord.needsTableRender = true
-            }
+            coord.needsTableRender = lastNonEmpty.trimmingCharacters(in: .whitespaces).hasPrefix("|")
             // No auto-scroll — caller (LLMOutputTextView or other wrapper) owns scroll behavior.
         } else {
             // Cursor blink — skip entirely during table render
@@ -162,10 +169,7 @@ public struct TerminalNeoTextView: NSViewRepresentable {
                 let cursorChar = text.hasSuffix("█") ? "█" : " "
                 let lastChar = storage.string.suffix(1)
                 if String(lastChar) != cursorChar {
-                    let isDark = tv.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                    let color: NSColor = isDark
-                        ? NSColor(red: 0.2, green: 0.9, blue: 0.3, alpha: 1)
-                        : NSColor(red: 0.05, green: 0.35, blue: 0.1, alpha: 1)
+                    let color = coord.textColor(for: tv)
                     storage.beginEditing()
                     storage.replaceCharacters(in: NSRange(location: attrLen - 1, length: 1),
                         with: NSAttributedString(string: cursorChar, attributes: [
